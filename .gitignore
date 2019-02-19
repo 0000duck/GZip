@@ -1,0 +1,9 @@
+src/.vs/
+src/Common/bin/
+src/Common/obj/
+src/GZip/bin/
+src/GZip/obj/
+src/Logic/bin/
+src/Logic/obj/
+
+src/packages/
