@@ -102,17 +102,21 @@ namespace Logic.Services
         }
 
         /// <summary>
-        /// Запуск нового потока на сжатие блока из очереди, при условии, что в пуле потоков есть свободный поток
+        /// Запуск нового потока на сжатие блока из очереди, при условии, что в пуле потоков есть свободный поток или свободное место в пуле
         /// </summary>
         private void TryStartNewCompressThread()
         {
-            var index = Array.IndexOf(_threadPool, null); //заполнение пула 
-            if (index >= 0)
+            int index;
+            if (_threadPool.Any(x => x == null))
             {
-                var queueItem = _queueOfBlocks.Dequeue();
-                _threadPool[index] = new Thread(() => Compression(queueItem.Key, queueItem.Value));
-                _threadPool[index].Start();
-                return;
+                index = Array.IndexOf(_threadPool, null); //заполнение пула 
+                if (index >= 0)
+                {
+                    var queueItem = _queueOfBlocks.Dequeue();
+                    _threadPool[index] = new Thread(() => Compression(queueItem.Key, queueItem.Value));
+                    _threadPool[index].Start();
+                    return;
+                }
             }
 
             var stopedThread = _threadPool.FirstOrDefault(x => x != null && x.ThreadState == ThreadState.Stopped);
