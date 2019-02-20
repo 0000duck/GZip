@@ -14,7 +14,6 @@ namespace Common.Structs
         public int MaxNumberOfQueueItems { get; }
         public int CurrentNumberOfQueueItems => QueueOfBlocks.Count;
 
-        public bool CanEnqueue() => CurrentNumberOfQueueItems < MaxNumberOfQueueItems;
         public bool CanDequeue() => CurrentNumberOfQueueItems > 0;
         public void Enqueue(KeyValuePair<int, byte[]> item) => QueueOfBlocks.Enqueue(item);
         public KeyValuePair<int, byte[]> Dequeue() => CanDequeue() ? QueueOfBlocks.Dequeue() : new KeyValuePair<int, byte[]>();

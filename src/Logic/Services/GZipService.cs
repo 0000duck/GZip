@@ -48,9 +48,8 @@ namespace Logic.Services
                         var bytesRead = 0;
                         while (bytesRead < buffer.Length)
                             bytesRead = sourceFile.Read(buffer, 0, buffer.Length);
-
-                        var indexOfBlock = i;
-                        _queueOfBlocks.Enqueue(new KeyValuePair<int, byte[]>(indexOfBlock, buffer));
+                        
+                        _queueOfBlocks.Enqueue(new KeyValuePair<int, byte[]>(i, buffer));
                         TryStartNewCompressThread();
                         remainingFileSize -= lenghtOfCurrentBlock;
                     }
@@ -92,7 +91,7 @@ namespace Logic.Services
         }
 
         /// <summary>
-        /// Завершение сфармированной очереди
+        /// Завершение сформированной очереди
         /// </summary>
         private void CompletionQueue()
         {
@@ -107,7 +106,7 @@ namespace Logic.Services
         /// </summary>
         private void TryStartNewCompressThread()
         {
-            var index = Array.IndexOf(_threadPool, null);
+            var index = Array.IndexOf(_threadPool, null); //заполнение пула 
             if (index >= 0)
             {
                 var queueItem = _queueOfBlocks.Dequeue();
