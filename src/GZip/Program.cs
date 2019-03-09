@@ -13,9 +13,10 @@ namespace GZip
 
         private static void Run(ICompressionService compressionService)
         {
-            while (true)
+            var run = true; 
+            while (run)
             {
-                Console.WriteLine("Выберите действие: 1 - compressing, 2 - decompressing");
+                Console.WriteLine("Выберите действие: 1 - сжатие, 2 - распаковка, 3 - выход");
                 switch (Console.ReadLine())
                 {
                     case "1":
@@ -23,6 +24,12 @@ namespace GZip
                         break;
                     case "2":
                         Decompress(compressionService);
+                        break;
+                    case "3":
+                        run = false;
+                        break;
+                    default:
+                        Console.WriteLine("Введено некорректное значение");
                         break;
                 }
             }
@@ -48,7 +55,6 @@ namespace GZip
             {
                 Console.WriteLine(e.Message);
             }
-
         }
 
         private static void Decompress(ICompressionService compressionService)
@@ -67,7 +73,6 @@ namespace GZip
             {
                 Console.WriteLine(e.Message);
             }
-
         }
     }
 }

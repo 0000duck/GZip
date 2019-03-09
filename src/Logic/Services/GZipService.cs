@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Threading;
 using Common.Abstractions.Services;
+using Common.Exceptions;
 using Common.Helpers;
 using Common.Structs;
 using Newtonsoft.Json;
@@ -35,27 +36,16 @@ namespace Logic.Services
 
                     if (!Directory.Exists($@"{pathOfSourceFile}\{_sourceFileName}\{_dataDirectoryName}"))
                         Directory.CreateDirectory($@"{pathOfDestinationFile}\{_sourceFileName}\{_dataDirectoryName}");
+                    
+                    var compressionConveyor = new Thread(QueueProcessing);
+                    compressionConveyor.Start();
 
-                    var remainingFileSize = sourceFile.Length;
-                    var blockCount = (int)(sourceFile.Length % _sizeOfBlock > 0 ? sourceFile.Length / _sizeOfBlock + 1 : sourceFile.Length % _sizeOfBlock);
-                    _queueOfBlocks = new QueueWrapper(SystemUsageHelper.GetAvailableRam(), (int)(_sizeOfBlock / (1024 * 1024)));
-                    _blocksOfArchive = new BlockOfArchive[blockCount];
+                    FillingQueue(sourceFile);
 
-                    for (int i = 0; i < blockCount; i++)
-                    {
-                        var lenghtOfCurrentBlock = remainingFileSize - _sizeOfBlock > 0 ? _sizeOfBlock : remainingFileSize;
-                        var buffer = new byte[lenghtOfCurrentBlock];
-                        var bytesRead = 0;
-                        while (bytesRead < buffer.Length)
-                            bytesRead = sourceFile.Read(buffer, 0, buffer.Length);
-                        
-                        _queueOfBlocks.Enqueue(new KeyValuePair<int, byte[]>(i, buffer));
-                        TryStartNewCompressThread();
-                        remainingFileSize -= lenghtOfCurrentBlock;
-                    }
-                    CompletionQueue();
-                    CreateInfoFile($@"{pathOfDestinationFile}\{_sourceFileName}\{_gzipFileInfoName}", sourceFile.Length, sourceFile.Name);
+                    compressionConveyor.Join();
                     WaitingForAllThreads();
+                    CreateInfoFile($@"{pathOfDestinationFile}\{_sourceFileName}\{_gzipFileInfoName}", sourceFile.Length, sourceFile.Name);
+                    
                 }
             }
             catch (Exception e)
@@ -67,7 +57,7 @@ namespace Logic.Services
 
         public void Decompression(string pathToArchiveDirectory)
         {
-            var archiveData = GetBlockCountFromInfoFile(pathToArchiveDirectory);
+            var archiveData = GetBlocksDataFromInfoFile(pathToArchiveDirectory);
             try
             {
                 using (var fileStream = File.Create($@"{pathToArchiveDirectory}\{_nameOfFile(archiveData.SourceFileName)}"))
@@ -91,42 +81,78 @@ namespace Logic.Services
         }
 
         /// <summary>
+        /// Заполнение очереди считанными блоками из исходного файла 
+        /// </summary>
+        /// <param name="sourceFile">Архивируемый файл</param>
+        private void FillingQueue(FileStream sourceFile)
+        {
+            var remainingFileSize = sourceFile.Length;
+            var blockCount = (int)(sourceFile.Length % _sizeOfBlock > 0 ? sourceFile.Length / _sizeOfBlock + 1 : sourceFile.Length % _sizeOfBlock);
+            _queueOfBlocks = new QueueWrapper(SystemUsageHelper.GetAvailableRam(), (int)(_sizeOfBlock / (1024 * 1024)));
+            _blocksOfArchive = new BlockOfArchive[blockCount];
+
+            for (int i = 0; i < blockCount; i++)
+            {
+                var lenghtOfCurrentBlock = remainingFileSize - _sizeOfBlock > 0 ? _sizeOfBlock : remainingFileSize;
+                var buffer = new byte[lenghtOfCurrentBlock];
+                var bytesRead = 0;
+                while (bytesRead < buffer.Length)
+                    bytesRead = sourceFile.Read(buffer, 0, buffer.Length);
+
+                while (!_queueOfBlocks.TryEnqueue(new KeyValuePair<int, byte[]>(i, buffer))) { }
+
+                remainingFileSize -= lenghtOfCurrentBlock;
+            }
+        }
+
+        /// <summary>
         /// Завершение сформированной очереди
         /// </summary>
-        private void CompletionQueue()
+        private void QueueProcessing()
         {
-            while (_queueOfBlocks.CanDequeue())
-            {
-                TryStartNewCompressThread();
-            }
+            while (!_queueOfBlocks.QueueIsActivate || TryStartNewCompressThread()){}
         }
 
         /// <summary>
         /// Запуск нового потока на сжатие блока из очереди, при условии, что в пуле потоков есть свободный поток или свободное место в пуле
         /// </summary>
-        private void TryStartNewCompressThread()
+        private bool TryStartNewCompressThread()
         {
-            int index;
-            if (_threadPool.Any(x => x == null))
+            try
             {
-                index = Array.IndexOf(_threadPool, null); //заполнение пула 
-                if (index >= 0)
+                int index;
+                if (_threadPool.Any(x => x == null))
+                {
+                    index = Array.IndexOf(_threadPool, null); //заполнение пула 
+                    if (index >= 0)
+                    {
+                        var queueItem = _queueOfBlocks.Dequeue();
+                        _threadPool[index] = new Thread(() => Compression(queueItem.Key, queueItem.Value));
+                        _threadPool[index].Start();
+                        return true;
+                    }
+                }
+
+                var stopedThread = _threadPool.FirstOrDefault(x => x != null && x.ThreadState == ThreadState.Stopped);
+                if (stopedThread != null)
                 {
                     var queueItem = _queueOfBlocks.Dequeue();
+                    index = Array.IndexOf(_threadPool, stopedThread);
                     _threadPool[index] = new Thread(() => Compression(queueItem.Key, queueItem.Value));
                     _threadPool[index].Start();
-                    return;
                 }
             }
-
-            var stopedThread = _threadPool.FirstOrDefault(x => x != null && x.ThreadState == ThreadState.Stopped);
-            if (stopedThread != null)
+            catch (EndQueueException)
             {
-                var queueItem = _queueOfBlocks.Dequeue();
-                index = Array.IndexOf(_threadPool, stopedThread);
-                _threadPool[index] = new Thread(() => Compression(queueItem.Key, queueItem.Value));
-                _threadPool[index].Start();
+                return false;
             }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+                throw;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -165,7 +191,7 @@ namespace Logic.Services
             }
         }
 
-        private ArchiveData GetBlockCountFromInfoFile(string path)
+        private ArchiveData GetBlocksDataFromInfoFile(string path)
         {
             try
             {
